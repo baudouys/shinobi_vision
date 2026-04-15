@@ -3,6 +3,7 @@ import mediapipe as mp
 import numpy as np
 import math
 
+
 # Fonction pour calculer la distance entre deux points
 def get_distance(p1, p2, w, h):
     return math.sqrt(((p1.x - p2.x) * w)**2 + ((p1.y - p2.y) * h)**2)
@@ -140,67 +141,64 @@ def main() -> None:
 
         # --- Implémentation des sorts ---
         # 6. Effet Clonage
+
         if geste == "CLONAGE" and person_roi is not None and mask_roi is not None:
             # Vérification de sécurité des tailles
             if person_roi.shape[:2] == mask_roi.shape[:2] and person_roi.size > 0:
-                
-                # Paramètres de l'effet
-                nb_clones_par_cote = 3
-                offset_x_base = hs_w * 0.8
-                offset_y_base = -70 # Décalage vertical pour le V (négatif = monte)
-                
-                for i in range(1, nb_clones_par_cote + 1):
-                    # Calcul des décalages cumulatifs
-                    current_offset_x = int(offset_x_base * i)
-                    current_offset_y = int(offset_y_base * i)
-                    dest_y = hs_y + current_offset_y
+                # Définition des positions relatives (Offsets)
+                # On utilise la taille de ta zone de capture (hs_w, hs_h) pour espacer
+                gap_x = int(hs_w * 0.9)
+                gap_y = int(hs_h * 0.4)
+
+                # Liste des positions (x_offset, y_offset, opacité)
+                positions_fixes = [
+                    # --- RANG ARRIÈRE (Y négatif, on commence par eux) ---
+                    (0, -gap_y * 1.5), 
+                    (-gap_x * 2, -gap_y), (gap_x * 2, -gap_y),
+                    (-gap_x, -gap_y), (gap_x, -gap_y),
+
+                    # --- RANG MILIEU (Y proche de 0) ---
+                    (-gap_x * 2, 0), (gap_x * 2, 0),
+                    (-gap_x, 0), (gap_x, 0),
+
+                    # --- RANG AVANT (Y positif, ils seront dessinés EN DERNIER) ---
+                    (-gap_x, gap_y), (gap_x, gap_y),
+                    (0, gap_y * 1.2)
+                ]
+                # On s'assure que les plus petits Y (haut de l'écran) sont dessinés en premier
+                positions_fixes.sort(key=lambda pos: pos[1])
+
+                # Sauvegarde de mon apparence réelle avant de commencer à gribouiller sur le frame
+                mon_apparence = person_roi.copy()
+                mon_masque = mask_roi.copy()
+
+                # Fonction de dessin bitwise (inchangée mais nécessaire)
+                def apply_cloned_person(dest_x, dest_y, current_frame, roi_color, roi_mask):
+                    if dest_x < 0 or dest_y < 0 or dest_x + hs_w >= w or dest_y + hs_h >= h:
+                        return current_frame
                     
-                    # Opacité dégressive (plus transparent quand éloigné)
-                    opacity = 0.8 / i 
-
-                    # Fonction interne pour appliquer le clone détouré
-                    def apply_cloned_person(dest_x, dest_y, current_frame, roi_color, roi_mask, alpha):
-                        # Vérifier les limites de l'image
-                        if dest_x < 0 or dest_y < 0 or dest_x + hs_w >= w or dest_y + hs_h >= h:
-                            return current_frame
-                        
-                        # Isoler la zone de destination en arrière-plan
-                        bg_target = current_frame[dest_y:dest_y+hs_h, dest_x:dest_x+hs_w]
-                        
-                        # Vérifier la correspondance des tailles (sécurité)
-                        if bg_target.shape[:2] != roi_color.shape[:2]:
-                            return current_frame
-
-                        # --- LA MAGIE EST ICI : Le "Poisson Blending" manuel ---
-                        # 1. Créer un masque inverse (le fond de la destination)
-                        mask_inv = cv2.bitwise_not(roi_mask)
-                        
-                        # 2. Noirci la zone de la personne dans l'arrière-plan cible
-                        # (On ne garde que le décor là où la personne va aller)
-                        bg_cleaned = cv2.bitwise_and(bg_target, bg_target, mask=mask_inv)
-                        
-                        # 3. Noirci le fond dans la ROI de la personne
-                        # (On ne garde que la personne, le fond devient noir)
-                        person_cleaned = cv2.bitwise_and(roi_color, roi_color, mask=roi_mask)
-                        
-                        # 4. Combiner les deux (Personne détourée + Décor propre)
-                        # C'est comme coller un autocollant parfaitement découpé
-                        cloned_combined = cv2.add(bg_cleaned, person_cleaned)
-                        
-                        # 5. Appliquer l'opacité (addWeighted entre le décor original et le clone combiné)
-                        result_zone = cv2.addWeighted(bg_target, 1 - alpha, cloned_combined, alpha, 0)
-                        
-                        # Réinsérer dans l'image finale
-                        current_frame[dest_y:dest_y+hs_h, dest_x:dest_x+hs_w] = result_zone
+                    bg_target = current_frame[dest_y:dest_y+hs_h, dest_x:dest_x+hs_w]
+                    if bg_target.shape[:2] != roi_color.shape[:2]:
                         return current_frame
 
-                    # --- Clone GAUCHE ---
-                    left_x = hs_x - current_offset_x
-                    frame = apply_cloned_person(left_x, dest_y, frame, person_roi, mask_roi, opacity)
+                    mask_inv = cv2.bitwise_not(roi_mask)
+                    bg_cleaned = cv2.bitwise_and(bg_target, bg_target, mask=mask_inv)
+                    person_cleaned = cv2.bitwise_and(roi_color, roi_color, mask=roi_mask)
+                    result_zone = cv2.add(bg_cleaned, person_cleaned)
+                    
+                    current_frame[dest_y:dest_y+hs_h, dest_x:dest_x+hs_w] = result_zone
+                    return current_frame
 
-                    # --- Clone DROIT ---
-                    right_x = hs_x + current_offset_x
-                    frame = apply_cloned_person(right_x, dest_y, frame, person_roi, mask_roi, opacity)
+                for ox, oy in positions_fixes:
+                    # On ignore la position (0,0) si elle est dans la liste pour ne pas me doubler
+                    if ox == 0 and oy == 0: continue
+                    dx = int(hs_x + ox)
+                    dy = int(hs_y + oy)
+                    # Application du clone
+                    frame = apply_cloned_person(dx, dy, frame, mon_apparence, mon_masque)
+
+                # Me redessiner moi-même au premier plan
+                frame = apply_cloned_person(hs_x, hs_y, frame, mon_apparence, mon_masque)
 
             #cv2.putText(frame, "SORT : TRINITÉ SUPRÊME (V)", (50, 50), 
                         #cv2.FONT_HERSHEY_DUPLEX, 1.0, (0, 0, 255), 3)
