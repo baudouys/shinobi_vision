@@ -483,8 +483,10 @@
             cap.release()
             cv2.destroyAllWindows()
 
+            inversion miroir pour que l'affichage soit plus intuitif avec frame = cv2.flip(frame, 1)
+
             <div class="figure-container">
-                <img src="./img_rapport/sec1/horseOnMars.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
+                <img src="./imgs/capture_video_ok.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
             </div>
             <span style="color:orange">generate_image</span>
 
@@ -493,31 +495,19 @@
 
     <div class="container">
         <div class="image-section">
-            <h2>Étape 2 -Détection du visage</h2>
+            <h2>Étape 2 et 3 -Détection du visage et zone de gestes</h2>
 
+            Utilisation de MediaPipe pour la détection du visage (mp.solutions.face_detection) version 0.10.21 (ancienne mais stable qui permet de ne pas utiliser la nouvelle API est beaucoup plus verbeuse car elle nécessite de télécharger des fichiers de modèles séparés (fichiers .task))
             
 
             <div class="figure-container">
-                <img src="./img_rapport/sec1/horseOnMars.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
+                <img src="./imgs/detection_visage_et_zone_gestes.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
             </div>
             <span style="color:orange">generate_image</span>
 
         </div>
     </div>
 
-    <div class="container">
-        <div class="image-section">
-            <h2>Étape 3 -Zone de geste</h2>
-
-            
-
-            <div class="figure-container">
-                <img src="./img_rapport/sec1/horseOnMars.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
-            </div>
-            <span style="color:orange">generate_image</span>
-
-        </div>
-    </div>
 
     <div class="container">
         <div class="image-section">
