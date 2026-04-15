@@ -63,6 +63,25 @@ def main() -> None:
                 cv2.putText(frame, "Zone Interaction", (roi_x, roi_y - 10), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
+        # 4. Détection de gestes simples
+
+        hand_results = hands.process(rgb_frame)
+        if hand_results.multi_hand_landmarks:
+
+            for hand_landmarks in hand_results.multi_hand_landmarks:
+                # Récupérer les coordonnées de l'index (Landmark 8) pour tester la collision
+                index_tip = hand_landmarks.landmark[8]
+                ix, iy = int(index_tip.x * w), int(index_tip.y * h)
+                # Vérifier si la main est dans la zone de gestes
+                if 'roi_x' in locals():
+                    if roi_x < ix < roi_x + roi_w and roi_y < iy < roi_y + roi_h:
+                        # La main est dans le rectangle. On dessine en rouge
+                        mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS,
+                                                 mp_drawing.DrawingSpec(color=(0, 0, 255)))
+                        cv2.putText(frame, "Geste detecte!", (ix, iy - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                    else:
+                        mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+
 
         # Affichage du flux
         cv2.imshow("Webcam", frame)
