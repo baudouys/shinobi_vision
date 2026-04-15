@@ -68,7 +68,7 @@ def main() -> None:
                 cv2.putText(frame, "Zone Interaction", (roi_x, roi_y - 10), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-        # 4. Détection de gestes simples
+        # 4. et 5. Détection de gestes et mapping gestes -> sorts
         hand_results = hands.process(rgb_frame)
         geste = "Aucun"
 
@@ -107,6 +107,35 @@ def main() -> None:
 
             for hl in hand_results.multi_hand_landmarks:
                 mp_drawing.draw_landmarks(frame, hl, mp_hands.HAND_CONNECTIONS)
+
+        # --- Implémentation des sorts ---
+        # 6. Effet Clonage
+        if geste == "CLONAGE":
+            pass
+        # 7. Effet flou
+        if geste == "FLOU":
+            for detection in face_results.detections:
+                bbox = detection.location_data.relative_bounding_box
+                # Calcul des dimensions du visage
+                fx, fy, f_w, f_h = int(bbox.xmin * w), int(bbox.ymin * h), int(bbox.width * w), int(bbox.height * h)
+                
+                # Agrandissement pour englober toute la tête
+                # On ajoute 40% en largeur et 60% en hauteur (vers le haut pour les cheveux)
+                head_x = max(0, int(fx - f_w * 0.2))
+                head_y = max(0, int(fy - f_h * 0.5))
+                head_w = min(w - head_x, int(f_w * 1.4))
+                head_h = min(h - head_y, int(f_h * 1.8))
+                
+                # Extraction de la zone de la tête entière
+                head_roi = frame[head_y:head_y+head_h, head_x:head_x+head_w]
+                # Application du flou Gaussien
+                blurred_head = cv2.GaussianBlur(head_roi, (99, 99), 30)
+                # Réinsertion dans l'image
+                frame[head_y:head_y+head_h, head_x:head_x+head_w] = blurred_head
+
+        # 8. Effet Transformation
+        if geste == "TRANSFORMATION":
+            pass
 
 
         # Affichage du flux
