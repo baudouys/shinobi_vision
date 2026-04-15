@@ -543,10 +543,49 @@
         <div class="image-section">
             <h2>Étape 5 -Système de “sorts</h2>
 
+            détection des gestes hand_results = hands.process(rgb_frame)
+
+            il faut les 2 mains
+
+            on récupère les 2 mains, le bout des doigts (index, majeurs, pouces idx1, maj1, thumb1 = h1[8], h1[12], h1[4]
+            idx2, maj2, thumb2 = h2[8], h2[12], h2[4])
+
+
             mapping geste → effet
 
+            <h3>Clonage</h3>
+            index et majeurs des deux mains se touchent
+
+            dist_idx = get_distance(idx1, idx2, w, h)
+            dist_maj = get_distance(maj1, maj2, w, h)
+            if dist_idx < 30 and dist_maj < 30:
+                geste = "CLONAGE"
             <div class="figure-container">
-                <img src="./img_rapport/sec1/horseOnMars.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
+                <img src="./imgs/detection_clonage.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
+            </div>
+
+            <h3>Flou</h3>
+            Geste triangle où les deux index se touchent ET les deux pouces se touchent
+            dist_thumb = get_distance(thumb1, thumb2, w, h)
+            if dist_idx < 40 and dist_thumb < 40 and geste == "Aucun":
+                geste = "FLOU"
+            <div class="figure-container">
+                <img src="./imgs/detection_flou.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
+            </div>
+
+            <h3>Transformation</h3>
+            Mains serrées, poignets proches
+            dist_wrist = get_distance(h1[5], h2[5], w, h)
+            if dist_wrist < 50 and geste == "Aucun":
+                geste = "TRANSFORMATION"
+            <div class="figure-container">
+                <img src="./imgs/detection_transformation.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
+            </div>
+
+            <h3>Aucun geste</h3>
+            Lorsqu'aucun des gestes n'est effectué, il n'y a bien aucun geste de détecté
+            <div class="figure-container">
+                <img src="./imgs/detection_aucun.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
             </div>
             <span style="color:orange">generate_image</span>
 

@@ -1,6 +1,11 @@
 import cv2
 import mediapipe as mp
 import numpy as np
+import math
+
+# Fonction pour calculer la distance entre deux points
+def get_distance(p1, p2, w, h):
+    return math.sqrt(((p1.x - p2.x) * w)**2 + ((p1.y - p2.y) * h)**2)
 
 
 def main() -> None:
@@ -64,23 +69,44 @@ def main() -> None:
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
         # 4. Détection de gestes simples
-
         hand_results = hands.process(rgb_frame)
-        if hand_results.multi_hand_landmarks:
+        geste = "Aucun"
 
-            for hand_landmarks in hand_results.multi_hand_landmarks:
-                # Récupérer les coordonnées de l'index (Landmark 8) pour tester la collision
-                index_tip = hand_landmarks.landmark[8]
-                ix, iy = int(index_tip.x * w), int(index_tip.y * h)
-                # Vérifier si la main est dans la zone de gestes
-                if 'roi_x' in locals():
-                    if roi_x < ix < roi_x + roi_w and roi_y < iy < roi_y + roi_h:
-                        # La main est dans le rectangle. On dessine en rouge
-                        mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS,
-                                                 mp_drawing.DrawingSpec(color=(0, 0, 255)))
-                        cv2.putText(frame, "Geste detecte!", (ix, iy - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                    else:
-                        mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+        if hand_results.multi_hand_landmarks and len(hand_results.multi_hand_landmarks) == 2:
+            # On récupère les deux mains
+            h1 = hand_results.multi_hand_landmarks[0].landmark
+            h2 = hand_results.multi_hand_landmarks[1].landmark
+
+            # Points d'intérêt (bouts des doigts)
+            idx1, maj1, thumb1 = h1[8], h1[12], h1[4]
+            idx2, maj2, thumb2 = h2[8], h2[12], h2[4]
+
+            # Sort 1 : CLONAGE (index et majeurs des deux mains se touchent)
+            dist_idx = get_distance(idx1, idx2, w, h)
+            dist_maj = get_distance(maj1, maj2, w, h)
+            if dist_idx < 30 and dist_maj < 30:
+                geste = "CLONAGE"
+
+            # Sort 2 : FLOU (Geste triangle où les deux index se touchent ET les deux pouces se touchent)
+            dist_thumb = get_distance(thumb1, thumb2, w, h)
+            if dist_idx < 40 and dist_thumb < 40 and geste == "Aucun":
+                geste = "FLOU"
+
+            # Sort 3 : Transformations (Mains serrées, poignets proches)
+            dist_wrist = get_distance(h1[5], h2[5], w, h)
+            if dist_wrist < 50 and geste == "Aucun":
+                geste = "TRANSFORMATION"
+
+            # Vérification si le centre entre les mains est dans la zone
+            cx, cy = int(((idx1.x + idx2.x)/2)*w), int(((idx1.y + idx2.y)/2)*h)
+            if roi_x < cx < roi_x + roi_w and roi_y < cy < roi_y + roi_h:
+                color = (0, 0, 255) # Rouge si actif
+                cv2.putText(frame, f"SORT : {geste}", (roi_x, roi_y - 40), cv2.FONT_HERSHEY_DUPLEX, 0.8, color, 2)
+            else:
+                color = (0, 255, 0) # Vert si zone non atteinte
+
+            for hl in hand_results.multi_hand_landmarks:
+                mp_drawing.draw_landmarks(frame, hl, mp_hands.HAND_CONNECTIONS)
 
 
         # Affichage du flux
