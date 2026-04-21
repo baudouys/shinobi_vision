@@ -12,14 +12,14 @@ def get_distance(p1, p2, w, h):
 def load_transformation_images():
     images = {}
     folder = "img_src"
-    files = {"messi": "messi.png", "saitama": "saitama.png", "vase": "vase.png"}
+    files = {"messi": "messi.png", "saitama": "saitama.png", "ballon": "ballon.png"}
     
-    # /!\ AJUSTE CES POINTS selon tes images (x, y en pixels dans le PNG source)
-    # Format: [Oeil Gauche, Oeil Droit, Menton]
+    # Format: [Oreille Gauche, Oreille Droite, Menton]
     refs = {
-        "messi": np.array([[693, 705], [1012, 742], [812, 1388]], dtype=np.float32),
-        "saitama": np.array([[779, 726], [1172, 753], [941, 1213]], dtype=np.float32),
-        "vase": np.array([[1620, 2006], [2455, 2006], [2008, 3157]], dtype=np.float32)
+        "messi": np.array([[1236, 867], [499, 836], [812, 1388]], dtype=np.float32),
+        "saitama": np.array([[1467, 904], [558, 904], [941, 1213]], dtype=np.float32),
+        # Pour le ballon, prends les deux bords du col et le pied
+        "ballon": np.array([[4120, 2525], [380, 2525], [2250, 4123]], dtype=np.float32)
     }
 
     for key, filename in files.items():
@@ -73,7 +73,7 @@ def main():
     seg_model = mp_selfie_seg.SelfieSegmentation(model_selection=0)
 
     assets = load_transformation_images()
-    choix_transfo = ["messi", "saitama", "vase"]
+    choix_transfo = ["messi", "saitama", "ballon"]
     transfo_idx = 1 # Saitama par défaut
     
     cap = cv2.VideoCapture(0)
@@ -105,11 +105,10 @@ def main():
             face_detected = True
             lm = mesh_res.multi_face_landmarks[0].landmark
             
-            # Points Warping (Oeil G: 130, Oeil D: 359, Menton: 152)
+            # Points stabilisés : Oreille G (234), Oreille D (454), Menton (152)
             pts = []
-            for i in [130, 359, 152]:# Oeil G, Oeil D, Menton
-                lm_point = mesh_res.multi_face_landmarks[0].landmark[i]
-                pts.append([lm_point.x * w, lm_point.y * h])
+            for i in [234, 454, 152]:
+                pts.append([lm[i].x * w, lm[i].y * h])
             dst_warping_points = np.array(pts, dtype=np.float32)
 
             # Zone Interaction
@@ -201,7 +200,7 @@ def main():
 
     # Nettoyage
     cap.release()
-    segment_model.close()
+    seg_model.close()
     hands.close()
     face_mesh.close()
     cap.release()
