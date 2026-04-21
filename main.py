@@ -2,248 +2,208 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import math
+import os
 
+# --- FONCTIONS UTILITAIRES ---
 
-# Fonction pour calculer la distance entre deux points
 def get_distance(p1, p2, w, h):
     return math.sqrt(((p1.x - p2.x) * w)**2 + ((p1.y - p2.y) * h)**2)
 
+def load_transformation_images():
+    images = {}
+    folder = "img_src"
+    files = {"messi": "messi.png", "saitama": "saitama.png", "vase": "vase.png"}
+    
+    # /!\ AJUSTE CES POINTS selon tes images (x, y en pixels dans le PNG source)
+    # Format: [Oeil Gauche, Oeil Droit, Menton]
+    refs = {
+        "messi": np.array([[693, 705], [1012, 742], [812, 1388]], dtype=np.float32),
+        "saitama": np.array([[779, 726], [1172, 753], [941, 1213]], dtype=np.float32),
+        "vase": np.array([[1620, 2006], [2455, 2006], [2008, 3157]], dtype=np.float32)
+    }
 
-def main() -> None:
-    # Initialisation de MediaPipe
+    for key, filename in files.items():
+        filepath = os.path.join(folder, filename)
+        if os.path.exists(filepath):
+            img = cv2.imread(filepath, cv2.IMREAD_UNCHANGED)
+            if img is not None:
+                images[key] = {"img": img, "ref": refs[key]}
+        else:
+            print(f"Fichier introuvable : {filepath}")
+    return images
+
+def apply_cloned_person(dest_x, dest_y, current_frame, roi_color, roi_mask, hs_w, hs_h):
+    h_f, w_f = current_frame.shape[:2]
+    
+    # Calcul des zones d'intersection (pour ne pas dépasser de l'écran)
+    x1, y1 = max(0, int(dest_x)), max(0, int(dest_y))
+    x2, y2 = min(w_f, x1 + hs_w), min(h_f, y1 + hs_h)
+    
+    # Calcul des dimensions réelles à copier
+    copy_w, copy_h = x2 - x1, y2 - y1
+    
+    if copy_w <= 0 or copy_h <= 0:
+        return current_frame
+
+    # On découpe la ROI et le masque pour qu'ils correspondent à la zone visible
+    roi_sub = roi_color[0:copy_h, 0:copy_w]
+    mask_sub = roi_mask[0:copy_h, 0:copy_w]
+    
+    bg_target = current_frame[y1:y2, x1:x2]
+    
+    if bg_target.shape[:2] != roi_sub.shape[:2]:
+        return current_frame
+
+    mask_inv = cv2.bitwise_not(mask_sub)
+    bg_cleaned = cv2.bitwise_and(bg_target, bg_target, mask=mask_inv)
+    person_cleaned = cv2.bitwise_and(roi_sub, roi_sub, mask=mask_sub)
+    
+    current_frame[y1:y2, x1:x2] = cv2.add(bg_cleaned, person_cleaned)
+    return current_frame
+
+# --- MAIN ---
+
+def main():
     mp_hands = mp.solutions.hands
-    mp_face_detection = mp.solutions.face_detection
-    mp_drawing = mp.solutions.drawing_utils
-    # Module de segmentation
-    mp_selfie_segmentation = mp.solutions.selfie_segmentation
-
-    # Configuration des modèles
+    mp_face_mesh = mp.solutions.face_mesh
+    mp_selfie_seg = mp.solutions.selfie_segmentation
+    
     hands = mp_hands.Hands(max_num_hands=2, min_detection_confidence=0.7)
-    face_detection = mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
-    # Création du segmenteur (0 pour modèle général, 1 pour paysage)
-    segment_model = mp_selfie_segmentation.SelfieSegmentation(model_selection=0)
+    face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True)
+    seg_model = mp_selfie_seg.SelfieSegmentation(model_selection=0)
 
-    # 1. Ouverture de la webcam
+    assets = load_transformation_images()
+    choix_transfo = ["messi", "saitama", "vase"]
+    transfo_idx = 1 # Saitama par défaut
+    
     cap = cv2.VideoCapture(0)
 
-    print("Webcam ouverte avec succès. Appuyer sur 'Echap' pour quitter.")
-
-    while True:
+    while cap.isOpened():
         ret, frame = cap.read()
-        
-        if not ret:
-            print("Échec de la capture du frame.")
-            break
+        if not ret: break
 
-        # Inversion miroir pour que ce soit plus intuitif
         frame = cv2.flip(frame, 1)
         h, w, _ = frame.shape
-
-        # Convertir en RGB pour MediaPipe
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        # --- Génération du Masque de Segmentation ---
-        # Cela détecte la personne entière sur l'image
-        seg_results = segment_model.process(rgb_frame)
-        
-        # Le masque est une image en niveaux de gris (0 à 255)
-        # On applique un seuil pour avoir un masque binaire pur (0 ou 255)
-        _, binary_mask = cv2.threshold(seg_results.segmentation_mask, 0.5, 255, cv2.THRESH_BINARY)
-        binary_mask = binary_mask.astype(np.uint8) # Conversion en uint8 pour OpenCV
-
-        # 2. Détection du visage
-        face_results = face_detection.process(rgb_frame)
-
-        # Coordonnées par défaut de la tête+épaules
-        person_roi = None
-        mask_roi = None
-        hs_x, hs_y, hs_w, hs_h = 0, 0, 0, 0
-
-        box_center = None
-        if face_results.detections:
-            for detection in face_results.detections:
-                # Récupérer la boîte englobante du visage
-                bbox = detection.location_data.relative_bounding_box
-                x, y, bw, bh = int(bbox.xmin * w), int(bbox.ymin * h), int(bbox.width * w), int(bbox.height * h)
-                
-                # Dessiner le visage (Bleu)
-                cv2.rectangle(frame, (x, y), (x + bw, y + bh), (255, 0, 0), 2)
-
-                # Définir la zone des gestes en dessous du visage
-                # On commence à y + bh (bas du visage) + un petit décalage (40 px)
-                padding = 40
-                roi_w, roi_h = 250, 180
-                
-                # Centrer le rectangle horizontalement par rapport au visage
-                roi_x = x + (bw // 2) - (roi_w // 2)
-                roi_y = y + bh + padding
-                
-                # S'assurer que le rectangle ne sort pas de l'image (évite les crashs)
-                roi_x = max(0, min(roi_x, w - roi_w))
-                roi_y = max(0, min(roi_y, h - roi_h))
-
-                # Dessiner la zone de détection des gestes (Vert)
-                cv2.rectangle(frame, (roi_x, roi_y), (roi_x + roi_w, roi_y + roi_h), (0, 255, 0), 2)
-                cv2.putText(frame, "Zone Interaction", (roi_x, roi_y - 10), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
-                # --- CALCUL ZONE TÊTE + ÉPAULES ---
-                # On agrandit : 60% plus large (pour les épaules), 50% plus haut (pour les cheveux), 200% plus bas (pour le buste)
-                hs_x = max(0, int(x - bw * 0.4)) # point de départ en x
-                hs_y = max(0, int(y - bh * 0.6)) # point de départ en y
-                hs_w = min(w - hs_x, int(bw * 1.8)) # hauteur totale
-                hs_h = min(h - hs_y, int(bh * 3.2)) # largeur totale
-                
-                # Extraction de la zone image originale
-                person_roi = frame[hs_y:hs_y+hs_h, hs_x:hs_x+hs_w]
-                # Extraction de la zone masque correspondante
-                mask_roi = binary_mask[hs_y:hs_y+hs_h, hs_x:hs_x+hs_w]
-
-        # 4. et 5. Détection de gestes et mapping gestes -> sorts
-        hand_results = hands.process(rgb_frame)
+        # Initialisation sécurisée (Fail-Safe)
         geste = "Aucun"
+        face_detected = False
+        dst_warping_points = None
+        person_roi, mask_roi = None, None
+        hs_x, hs_y, hs_w, hs_h = 0, 0, 0, 0
+        roi_x, roi_y, roi_w, roi_h = 0, 0, 250, 180
 
-        if hand_results.multi_hand_landmarks and len(hand_results.multi_hand_landmarks) == 2:
-            # On récupère les deux mains
-            h1 = hand_results.multi_hand_landmarks[0].landmark
-            h2 = hand_results.multi_hand_landmarks[1].landmark
+        # 1. Segmentation
+        seg_res = seg_model.process(rgb_frame)
+        _, binary_mask = cv2.threshold(seg_res.segmentation_mask, 0.5, 255, cv2.THRESH_BINARY)
+        binary_mask = binary_mask.astype(np.uint8)
 
-            # Points d'intérêt (bouts des doigts)
-            idx1, maj1, thumb1 = h1[8], h1[12], h1[4]
-            idx2, maj2, thumb2 = h2[8], h2[12], h2[4]
+        # 2. Face Mesh
+        mesh_res = face_mesh.process(rgb_frame)
+        if mesh_res.multi_face_landmarks:
+            face_detected = True
+            lm = mesh_res.multi_face_landmarks[0].landmark
+            
+            # Points Warping (Oeil G: 130, Oeil D: 359, Menton: 152)
+            pts = []
+            for i in [130, 359, 152]:# Oeil G, Oeil D, Menton
+                lm_point = mesh_res.multi_face_landmarks[0].landmark[i]
+                pts.append([lm_point.x * w, lm_point.y * h])
+            dst_warping_points = np.array(pts, dtype=np.float32)
 
-            # Sort 1 : CLONAGE (index et majeurs des deux mains se touchent)
-            dist_idx = get_distance(idx1, idx2, w, h)
-            dist_maj = get_distance(maj1, maj2, w, h)
-            if dist_idx < 30 and dist_maj < 30:
-                geste = "CLONAGE"
+            # Zone Interaction
+            roi_x, roi_y = int(lm[152].x * w) - 125, int(lm[152].y * h) + 50
+            roi_x, roi_y = max(0, min(roi_x, w-roi_w)), max(0, min(roi_y, h-roi_h))
 
-            # Sort 2 : FLOU (Geste triangle où les deux index se touchent ET les deux pouces se touchent)
-            dist_thumb = get_distance(thumb1, thumb2, w, h)
-            if dist_idx < 40 and dist_thumb < 40 and geste == "Aucun":
-                geste = "FLOU"
+            # Zone Tête+Épaules (Clonage)
+            # On définit une boîte autour du visage (Landmarks 10 haut, 152 bas, 234 gauche, 454 droite)
+            fw = int((lm[454].x - lm[234].x) * w)
+            fh = int((lm[152].y - lm[10].y) * h)
+            hs_w, hs_h = int(fw * 2.4), int(fh * 3.5)
+            hs_x, hs_y = int(lm[1].x * w) - hs_w//2, int(lm[1].y * h) - hs_h//3
+            
+            # Capture sécurisée
+            if hs_x >= 0 and hs_y >= 0 and hs_x+hs_w < w and hs_y+hs_h < h:
+                person_roi = frame[hs_y:hs_y+hs_h, hs_x:hs_x+hs_w].copy()
+                mask_roi = binary_mask[hs_y:hs_y+hs_h, hs_x:hs_x+hs_w].copy()
 
-            # Sort 3 : Transformations (Mains serrées, poignets proches)
-            dist_wrist = get_distance(h1[5], h2[5], w, h)
-            if dist_wrist < 50 and geste == "Aucun":
-                geste = "TRANSFORMATION"
+        # 3. Mains
+        hand_res = hands.process(rgb_frame)
+        if hand_res.multi_hand_landmarks and len(hand_res.multi_hand_landmarks) == 2:
+            h1, h2 = hand_res.multi_hand_landmarks[0].landmark, hand_res.multi_hand_landmarks[1].landmark
+            d_idx = get_distance(h1[8], h2[8], w, h)
+            d_th = get_distance(h1[4], h2[4], w, h)
+            d_base = get_distance(h1[5], h2[5], w, h)
+            
+            if d_idx < 35 and d_th < 35: geste = "FLOU"
+            elif d_idx < 30: geste = "CLONAGE"
+            elif d_base < 60: geste = "TRANSFORMATION"
 
-            # Vérification si le centre entre les mains est dans la zone
-            cx, cy = int(((idx1.x + idx2.x)/2)*w), int(((idx1.y + idx2.y)/2)*h)
-            if roi_x < cx < roi_x + roi_w and roi_y < cy < roi_y + roi_h:
-                color = (0, 0, 255) # Rouge si actif
-                cv2.putText(frame, f"{geste}", (roi_x, roi_y - 25), cv2.FONT_HERSHEY_DUPLEX, 0.5, color, 2)
-            else:
-                color = (0, 255, 0) # Vert si zone non atteinte
+        # --- APPLICATION DES EFFETS ---
 
-            for hl in hand_results.multi_hand_landmarks:
-                mp_drawing.draw_landmarks(frame, hl, mp_hands.HAND_CONNECTIONS)
+        if geste == "CLONAGE" and person_roi is not None:
+            gx, gy = int(hs_w * 0.9), int(hs_h * 0.4)
+            pos = [(0,-gy*1.5), (-gx*2,-gy), (gx*2,-gy), (-gx,0), (gx,0), (0,gy*1.2)]
+            pos.sort(key=lambda p: p[1])
+            for ox, oy in pos:
+                if abs(ox)<10 and abs(oy)<10: continue
+                frame = apply_cloned_person(hs_x+ox, hs_y+oy, frame, person_roi, mask_roi, hs_w, hs_h)
+            frame = apply_cloned_person(hs_x, hs_y, frame, person_roi, mask_roi, hs_w, hs_h)
 
-        # --- Implémentation des sorts ---
-        # 6. Effet Clonage
-
-        if geste == "CLONAGE" and person_roi is not None and mask_roi is not None:
-            # Vérification de sécurité des tailles
-            if person_roi.shape[:2] == mask_roi.shape[:2] and person_roi.size > 0:
-                # Définition des positions relatives (Offsets)
-                # On utilise la taille de ta zone de capture (hs_w, hs_h) pour espacer
-                gap_x = int(hs_w * 0.9)
-                gap_y = int(hs_h * 0.4)
-
-                # Liste des positions (x_offset, y_offset, opacité)
-                positions_fixes = [
-                    # --- RANG ARRIÈRE (Y négatif, on commence par eux) ---
-                    (0, -gap_y * 1.5), 
-                    (-gap_x * 2, -gap_y), (gap_x * 2, -gap_y),
-                    (-gap_x, -gap_y), (gap_x, -gap_y),
-
-                    # --- RANG MILIEU (Y proche de 0) ---
-                    (-gap_x * 2, 0), (gap_x * 2, 0),
-                    (-gap_x, 0), (gap_x, 0),
-
-                    # --- RANG AVANT (Y positif, ils seront dessinés EN DERNIER) ---
-                    (-gap_x, gap_y), (gap_x, gap_y),
-                    (0, gap_y * 1.2)
-                ]
-                # On s'assure que les plus petits Y (haut de l'écran) sont dessinés en premier
-                positions_fixes.sort(key=lambda pos: pos[1])
-
-                # Sauvegarde de mon apparence réelle avant de commencer à gribouiller sur le frame
-                mon_apparence = person_roi.copy()
-                mon_masque = mask_roi.copy()
-
-                # Fonction de dessin bitwise (inchangée mais nécessaire)
-                def apply_cloned_person(dest_x, dest_y, current_frame, roi_color, roi_mask):
-                    if dest_x < 0 or dest_y < 0 or dest_x + hs_w >= w or dest_y + hs_h >= h:
-                        return current_frame
-                    
-                    bg_target = current_frame[dest_y:dest_y+hs_h, dest_x:dest_x+hs_w]
-                    if bg_target.shape[:2] != roi_color.shape[:2]:
-                        return current_frame
-
-                    mask_inv = cv2.bitwise_not(roi_mask)
-                    bg_cleaned = cv2.bitwise_and(bg_target, bg_target, mask=mask_inv)
-                    person_cleaned = cv2.bitwise_and(roi_color, roi_color, mask=roi_mask)
-                    result_zone = cv2.add(bg_cleaned, person_cleaned)
-                    
-                    current_frame[dest_y:dest_y+hs_h, dest_x:dest_x+hs_w] = result_zone
-                    return current_frame
-
-                for ox, oy in positions_fixes:
-                    # On ignore la position (0,0) si elle est dans la liste pour ne pas me doubler
-                    if ox == 0 and oy == 0: continue
-                    dx = int(hs_x + ox)
-                    dy = int(hs_y + oy)
-                    # Application du clone
-                    frame = apply_cloned_person(dx, dy, frame, mon_apparence, mon_masque)
-
-                # Me redessiner moi-même au premier plan
-                frame = apply_cloned_person(hs_x, hs_y, frame, mon_apparence, mon_masque)
-
-            #cv2.putText(frame, "SORT : TRINITÉ SUPRÊME (V)", (50, 50), 
-                        #cv2.FONT_HERSHEY_DUPLEX, 1.0, (0, 0, 255), 3)
-
-        # 7. Effet flou
-        if geste == "FLOU":
-            for detection in face_results.detections:
-                bbox = detection.location_data.relative_bounding_box
-                # Calcul des dimensions du visage
-                x, y, bw, bh = int(bbox.xmin * w), int(bbox.ymin * h), int(bbox.width * w), int(bbox.height * h)
+        elif geste == "TRANSFORMATION" and face_detected and dst_warping_points is not None:
+            asset = assets.get(choix_transfo[transfo_idx])
+            if asset:
+                # 1. On récupère les points de l'image PNG
+                src_pts = asset["ref"]
                 
-                # Agrandissement pour englober toute la tête
-                # On ajoute 40% en largeur et 60% en hauteur (vers le haut pour les cheveux)
-                head_x = max(0, int(x - bw * 0.2))
-                head_y = max(0, int(y - bh * 0.5))
-                head_w = min(w - head_x, int(bw * 1.4))
-                head_h = min(h - head_y, int(bh * 1.8))
+                # 2. On calcule la matrice
+                mat = cv2.getAffineTransform(src_pts, dst_warping_points)
                 
-                # Extraction de la zone de la tête entière
-                head_roi = frame[head_y:head_y+head_h, head_x:head_x+head_w]
-                # Application du flou Gaussien
-                blurred_head = cv2.GaussianBlur(head_roi, (99, 99), 30)
-                # Réinsertion dans l'image
-                frame[head_y:head_y+head_h, head_x:head_x+head_w] = blurred_head
+                # 3. On applique le warping
+                # IMPORTANT : On crée une image vide de la taille du FRAME
+                warped = cv2.warpAffine(asset["img"], mat, (w, h), 
+                                       flags=cv2.INTER_LINEAR, 
+                                       borderMode=cv2.BORDER_CONSTANT, 
+                                       borderValue=(0,0,0,0))
+                
+                if warped.shape[2] == 4:
+                    # Extraction BGR et Alpha
+                    bgr_w = warped[:, :, :3]
+                    alpha_w = warped[:, :, 3]
+                    
+                    # Fusion
+                    mask_inv = cv2.bitwise_not(alpha_w)
+                    img_bg = cv2.bitwise_and(frame, frame, mask=mask_inv)
+                    img_fg = cv2.bitwise_and(bgr_w, bgr_w, mask=alpha_w)
+                    frame = cv2.add(img_bg, img_fg)
 
-        # 8. Effet Transformation
-        if geste == "TRANSFORMATION":
-            pass
+        elif geste == "FLOU" and face_detected:
+            # Simple flou de zone
+            f_zone = frame[max(0,hs_y):hs_y+hs_h, max(0,hs_x):hs_x+hs_w]
+            if f_zone.size > 0:
+                frame[max(0,hs_y):hs_y+hs_h, max(0,hs_x):hs_x+hs_w] = cv2.GaussianBlur(f_zone, (99,99), 30)
 
+        # UI
+        if face_detected:
+            cv2.rectangle(frame, (roi_x, roi_y), (roi_x + roi_w, roi_y + roi_h), (0, 255, 0), 1)
+            cv2.putText(frame, f"Geste: {geste}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-        # Affichage du flux
-        cv2.imshow("Webcam", frame)
-
-        # Fermer l'affichage avec ESC
+        cv2.imshow("Shinobi Vision", frame)
         key = cv2.waitKey(1) & 0xFF
-        if key == 27:
-            break
+        if key == 27: break
         elif key == ord('s'): # 's' pour screenshot
             cv2.imwrite("screen.png", frame)
             print("Capture sauvegardée.")
+        elif key == ord('1'): transfo_idx = 0
+        elif key == ord('2'): transfo_idx = 1
+        elif key == ord('3'): transfo_idx = 2
 
     # Nettoyage
+    cap.release()
     segment_model.close()
     hands.close()
-    face_detection.close()
+    face_mesh.close()
     cap.release()
     cv2.destroyAllWindows()
 

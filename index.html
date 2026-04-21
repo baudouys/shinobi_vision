@@ -603,6 +603,62 @@
             Pb de profondeur (le clone au dessus de moi) -> redessiner moi à la fin à me position exacte
             + copie de person_roi et mask_roi
 
+            masque de segmentation avec segment_model.process(rgb_frame)
+
+            # On utilise la taille de ta zone de capture (hs_w, hs_h) pour espacer
+                gap_x = int(hs_w * 0.9)
+                gap_y = int(hs_h * 0.4)
+
+                # Liste des positions (x_offset, y_offset, opacité)
+                positions_fixes = [
+                    # --- RANG ARRIÈRE (Y négatif, on commence par eux) ---
+                    (0, -gap_y * 1.5), 
+                    (-gap_x * 2, -gap_y), (gap_x * 2, -gap_y),
+                    (-gap_x, -gap_y), (gap_x, -gap_y),
+
+                    # --- RANG MILIEU (Y proche de 0) ---
+                    (-gap_x * 2, 0), (gap_x * 2, 0),
+                    (-gap_x, 0), (gap_x, 0),
+
+                    # --- RANG AVANT (Y positif, ils seront dessinés EN DERNIER) ---
+                    (-gap_x, gap_y), (gap_x, gap_y),
+                    (0, gap_y * 1.2)
+                ]
+                # On s'assure que les plus petits Y (haut de l'écran) sont dessinés en premier
+                positions_fixes.sort(key=lambda pos: pos[1])
+
+                # Sauvegarde de mon apparence réelle avant de commencer à gribouiller sur le frame
+                mon_apparence = person_roi.copy()
+                mon_masque = mask_roi.copy()
+
+                # Fonction de dessin bitwise (inchangée mais nécessaire)
+                def apply_cloned_person(dest_x, dest_y, current_frame, roi_color, roi_mask):
+                    if dest_x < 0 or dest_y < 0 or dest_x + hs_w >= w or dest_y + hs_h >= h:
+                        return current_frame
+                    
+                    bg_target = current_frame[dest_y:dest_y+hs_h, dest_x:dest_x+hs_w]
+                    if bg_target.shape[:2] != roi_color.shape[:2]:
+                        return current_frame
+
+                    mask_inv = cv2.bitwise_not(roi_mask)
+                    bg_cleaned = cv2.bitwise_and(bg_target, bg_target, mask=mask_inv)
+                    person_cleaned = cv2.bitwise_and(roi_color, roi_color, mask=roi_mask)
+                    result_zone = cv2.add(bg_cleaned, person_cleaned)
+                    
+                    current_frame[dest_y:dest_y+hs_h, dest_x:dest_x+hs_w] = result_zone
+                    return current_frame
+
+                for ox, oy in positions_fixes:
+                    # On ignore la position (0,0) si elle est dans la liste pour ne pas me doubler
+                    if ox == 0 and oy == 0: continue
+                    dx = int(hs_x + ox)
+                    dy = int(hs_y + oy)
+                    # Application du clone
+                    frame = apply_cloned_person(dx, dy, frame, mon_apparence, mon_masque)
+
+                # Me redessiner moi-même au premier plan
+                frame = apply_cloned_person(hs_x, hs_y, frame, mon_apparence, mon_masque)
+
             <div class="figure-container">
                 <img src="./img_rapport/sec1/horseOnMars.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
             </div>
@@ -615,7 +671,21 @@
         <div class="image-section">
             <h2>Étape 7 — Effet 2 : Flou</h2>
 
-            
+            # Calcul des dimensions du visage
+                x, y, bw, bh = int(bbox.xmin * w), int(bbox.ymin * h), int(bbox.width * w), int(bbox.height * h)
+                
+                # Agrandissement pour englober toute la tête
+                # On ajoute 40% en largeur et 60% en hauteur (vers le haut pour les cheveux)
+                head_x = max(0, int(x - bw * 0.2))
+                head_y = max(0, int(y - bh * 0.5))
+                head_w = min(w - head_x, int(bw * 1.4))
+                head_h = min(h - head_y, int(bh * 1.8))
+                
+                # Extraction de la zone de la tête entière
+                head_roi = frame[head_y:head_y+head_h, head_x:head_x+head_w]
+                # Application du flou Gaussien
+                blurred_head = cv2.GaussianBlur(head_roi, (99, 99), 30)
+                # Réinsertion dans l'image
 
             <div class="figure-container">
                 <img src="./img_rapport/sec1/horseOnMars.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
