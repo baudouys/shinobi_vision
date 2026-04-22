@@ -184,16 +184,12 @@ def main():
             
             # GESTE DE LA CROIX (Annulation)
             idx1, idx2 = h1[6], h2[6]
-            dist_indices = get_distance(idx1, idx2, w, h)
-            # On vérifie si les index se croisent (position X inversée par rapport aux poignets)
-            poignet1_x, poignet2_x = h1[0].x, h2[0].x
-            is_crossed = (poignet1_x < poignet2_x and idx1.x > idx2.x) or (poignet1_x > poignet2_x and idx1.x < idx2.x)
-
-            # On vérifie si les index se croisent (position X inversée par rapport aux poignets)
-            poignet1_x, poignet2_x = h1[0].x, h2[0].x
-            is_crossed = (h1[0].x < h2[0].x and h1[8].x > h2[8].x) or (poignet1_x > poignet2_x and idx1.x < idx2.x)
+            dist_indices_cancel = get_distance(idx1, idx2, w, h)
             
-            if dist_indices < 20 and is_crossed:
+            # Logique simplifiée : Index 1 est à droite du poignet 2 ET Index 2 est à gauche du poignet 1
+            is_crossed = (idx1.x > h2[0].x and idx2.x < h1[0].x) or (idx1.x < h2[0].x and idx2.x > h1[0].x)
+            
+            if dist_indices_cancel < 20 and is_crossed:
                 if sort_actif: 
                     if son_cancel: son_cancel.play()
                 sort_actif = False
@@ -202,45 +198,68 @@ def main():
             # ACTIVATION DANS LA ZONE
             cx_hand, cy_hand = int(((idx1.x + idx2.x)/2)*w), int(((idx1.y + idx2.y)/2)*h)
             if roi_x < cx_hand < roi_x + roi_w and roi_y < cy_hand < roi_y + roi_h:
-                d_idx = get_distance(h1[8], h2[8], w, h) # bouts des index
-                d_th = get_distance(h1[4], h2[4], w, h) # bouts des pouces
-                d_maj = get_distance(h1[12], h2[12], w, h) # bouts des majeurs
-                d_basemaj = get_distance(h1[9], h2[9], w, h) # bases des majeurs
-                d_palms = get_distance(h1[0], h2[0], w, h) # Distance entre les bases des paumes
-                d_boutmajeur_milindex = get_distance(h1[6], h1[12], w, h) # Distance entre le bout du majeur et le milieu de l'index
-                d_lf = get_distance(h1[20], h2[20], w, h) # Distance entre les bouts des petits doigts
                 
-                if d_idx < 20 and d_th < 20 and d_palms > 50: geste_instantane = "FLOU"
-                elif d_idx < 20 and d_maj < 20: geste_instantane = "CLONAGE"
-                elif d_basemaj < 20: geste_instantane = "TRANSFORMATION"
-                elif d_boutmajeur_milindex < 20 and d_basemaj > 50: geste_instantane = "EXTENSION_TERRITOIRE"
-                elif d_lf < 20 and d_idx > 50 : geste_instantane = "DISPARITION"
+                # Calcul des distances avec des variables claires
+                d_index = get_distance(h1[8], h2[8], w, h)
+                d_pouces = get_distance(h1[4], h2[4], w, h)
+                d_majeurs = get_distance(h1[12], h2[12], w, h)
+                d_base_maj = get_distance(h1[9], h2[9], w, h)
+                d_paumes = get_distance(h1[0], h2[0], w, h)
+                d_auriculaires = get_distance(h1[20], h2[20], w, h)
 
-                if geste_instantane != "Aucun" and (not sort_actif or type_sort_actif != geste_instantane):
-                    #  Jouer le son
-                    if geste_instantane == "CLONAGE" and son_clonage: son_clonage.play()
-                    if geste_instantane == "TRANSFORMATION" and son_transfo: son_transfo.play()
-                    if geste_instantane == "FLOU" and son_flou: son_flou.play()
-                    if geste_instantane == "EXTENSION_TERRITOIRE" and son_territoire: son_territoire.play()
-                    if geste_instantane == "DISPARITION" and son_disparition: son_disparition.play()
-                    sort_actif = True
-                    type_sort_actif = geste_instantane
-                    temps_activation = current_time
+                # --- LOGIQUE DE PRIORITÉ ---
+                
+                # 1. EXTENSION TERRITOIRE : Paumes proches (Geste de Gojo / Mains jointes)
+                if d_paumes < 30: geste_instantane = "EXTENSION_TERRITOIRE"
+                
+                # 2. TRANSFORMATION : Bases des majeurs proches (Mains serrées)
+                elif d_base_maj < 20: geste_instantane = "TRANSFORMATION"
+                
+                # 3. FLOU : Index ET Pouces se touchent (Signe OK ou triangle)
+                elif d_index < 20 and d_pouces < 20: geste_instantane = "FLOU"
+                
+                # 4. CLONAGE : Uniquement les index se touchent (Signe Ninja)
+                elif d_index < 20 and d_majeurs < 20: geste_instantane = "CLONAGE"
+                
+                # 5. DISPARITION : Uniquement les petits doigts (Auriculaires)
+                elif d_auriculaires < 20 and d_index > 60: geste_instantane = "DISPARITION"
 
-            for hl in hand_res.multi_hand_landmarks:
-                mp_drawing.draw_landmarks(frame_affichage, hl, mp_hands.HAND_CONNECTIONS)
+            if geste_instantane != "Aucun" and (not sort_actif or type_sort_actif != geste_instantane):
+                #  Jouer le son
+                if geste_instantane == "CLONAGE" and son_clonage: son_clonage.play()
+                if geste_instantane == "TRANSFORMATION" and son_transfo: son_transfo.play()
+                if geste_instantane == "FLOU" and son_flou: son_flou.play()
+                if geste_instantane == "EXTENSION_TERRITOIRE" and son_territoire: son_territoire.play()
+                if geste_instantane == "DISPARITION" and son_disparition: son_disparition.play()
+                sort_actif = True
+                type_sort_actif = geste_instantane
+                temps_activation = current_time    
+
+            #for hl in hand_res.multi_hand_landmarks:
+                #mp_drawing.draw_landmarks(frame_affichage, hl, mp_hands.HAND_CONNECTIONS)
 
         # --- GESTION DU TIMER ---
         if sort_actif:
-            if current_time - temps_activation > DUREE_MAX:
+            dt_sort = current_time - temps_activation
+            if dt_sort > DUREE_MAX:
                 sort_actif = False
                 type_sort_actif = "Aucun"
             else:
-                temps_restant = int(DUREE_MAX - (current_time - temps_activation))
-                cv2.putText(frame_affichage, f"SORT: {type_sort_actif} ({temps_restant}s)", (50, 50), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                cv2.putText(frame_affichage, "Croisez les index pour annuler", (50, 80), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+                temps_restant = int(DUREE_MAX - dt_sort)
+                
+                # 1. NOM DU SORT (Haut à gauche)
+                # On utilise une taille de police plus petite (0.6) et une épaisseur de 1
+                cv2.putText(frame_affichage, f"SORT: {type_sort_actif}", (20, 30), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 1)
+                
+                # 2. TIMER (Haut à droite)
+                # On calcule la position X en fonction de la largeur 'w' de l'image
+                txt_timer = f"TEMPS: {temps_restant}s"
+                size_timer = cv2.getTextSize(txt_timer, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)[0]
+                pos_x_timer = w - size_timer[0] - 20 # Marge de 20 pixels du bord droit
+                
+                cv2.putText(frame_affichage, txt_timer, (pos_x_timer, 30), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 1)
 
         # --- APPLICATION DES EFFETS ---
         if sort_actif:
@@ -395,9 +414,9 @@ def main():
 
 
         # UI
-        if face_detected:
+        """ if face_detected:
             cv2.rectangle(frame_affichage, (roi_x, roi_y), (roi_x + roi_w, roi_y + roi_h), (0, 255, 0), 1)
-            cv2.putText(frame_affichage, f"Geste: {geste_instantane}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            cv2.putText(frame_affichage, f"Geste: {geste_instantane}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2) """
 
         cv2.imshow("Shinobi Vision", frame_affichage)
         key = cv2.waitKey(1) & 0xFF
@@ -405,7 +424,7 @@ def main():
         if key == 27: break
         # Screenshot
         elif key == ord('s'): # 's' pour screenshot
-            cv2.imwrite("screen.png", frame_affichage)
+            cv2.imwrite(f"screen_{int(time.time)}.png", frame_affichage)
             print("Capture sauvegardée.")
         elif key == ord('1'): transfo_idx = 0
         elif key == ord('2'): transfo_idx = 1
