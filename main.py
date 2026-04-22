@@ -4,9 +4,17 @@ import numpy as np
 import math
 import os
 import time
+import pygame
+
+# --- INITIALISATION AUDIO ---
+pygame.mixer.init()
+def load_sound(name):
+    path = os.path.join("sounds_src", name)
+    if os.path.exists(path):
+        return pygame.mixer.Sound(path)
+    return None
 
 # --- FONCTIONS UTILITAIRES ---
-
 def get_distance(p1, p2, w, h):
     return math.sqrt(((p1.x - p2.x) * w)**2 + ((p1.y - p2.y) * h)**2)
 
@@ -83,6 +91,12 @@ def main():
     type_sort_actif = "Aucun"
     temps_activation = 0
     DUREE_MAX = 30 # Secondes
+
+    # Chargement des sons
+    son_clonage = load_sound("clonage.mp3")
+    son_transfo = load_sound("transformation.mp3")
+    son_flou = load_sound("flou.mp3")
+    son_cancel = load_sound("cancel.mp3")
     
     cap = cv2.VideoCapture(0)
 
@@ -158,6 +172,8 @@ def main():
             is_crossed = (h1[0].x < h2[0].x and h1[8].x > h2[8].x) or (poignet1_x > poignet2_x and idx1.x < idx2.x)
             
             if dist_indices < 40 and is_crossed:
+                if sort_actif: 
+                    if son_cancel: son_cancel.play()
                 sort_actif = False
                 type_sort_actif = "Aucun"
 
@@ -172,7 +188,11 @@ def main():
                 elif d_idx < 30: geste_instantane = "CLONAGE"
                 elif d_base < 60: geste_instantane = "TRANSFORMATION"
 
-                if geste_instantane != "Aucun":
+                if geste_instantane != "Aucun" and (not sort_actif or type_sort_actif != geste_instantane):
+                    #  Jouer le son
+                    if geste_instantane == "CLONAGE" and son_clonage: son_clonage.play()
+                    if geste_instantane == "TRANSFORMATION" and son_transfo: son_transfo.play()
+                    if geste_instantane == "FLOU" and son_flou: son_flou.play()
                     sort_actif = True
                     type_sort_actif = geste_instantane
                     temps_activation = current_time
@@ -195,13 +215,41 @@ def main():
         # --- APPLICATION DES EFFETS ---
         if sort_actif:
             if type_sort_actif == "CLONAGE" and person_roi is not None:
+                # Définition des positions et des décalages
                 gx, gy = int(hs_w * 0.9), int(hs_h * 0.4)
-                pos = [(0,-gy*1.5), (-gx*2,-gy), (gx*2,-gy), (-gx,0), (gx,0), (0,gy*1.2)]
-                pos.sort(key=lambda p: p[1])
+                # (x_offset, y_offset)
+                pos = [(0, -gy*1.5), (-gx*2, -gy), (gx*2, -gy), (-gx, 0), (gx, 0), (0, gy*1.2)]
+                
+                # Séparation des clones en deux groupes (Derrière et Devant)
+                clones_derriere = []
+                clones_devant = []
+                
                 for ox, oy in pos:
-                    if abs(ox)<10 and abs(oy)<10: continue
+                    # On ignore la position centrale (0,0) pour ne pas te doubler
+                    if abs(ox) < 10 and abs(oy) < 10:
+                        continue
+                        
+                    # Si oy est négatif ou nul, le clone est derrière ou à côté
+                    if oy <= 0:
+                        clones_derriere.append((ox, oy))
+                    # Si oy est positif, le clone est devant
+                    else:
+                        clones_devant.append((ox, oy))
+                
+                # Tri des clones pour l'algorithme du peintre (par Y croissant)
+                clones_derriere.sort(key=lambda p: p[1])
+                clones_devant.sort(key=lambda p: p[1])
+
+                # --- 1 : Dessiner les clones DERRIÈRE moi ---
+                for ox, oy in clones_derriere:
                     frame_affichage = apply_cloned_person(hs_x+ox, hs_y+oy, frame_affichage, person_roi, mask_roi, hs_w, hs_h)
+
+                # --- 2 : Te dessiner moi au milieu ---
                 frame_affichage = apply_cloned_person(hs_x, hs_y, frame_affichage, person_roi, mask_roi, hs_w, hs_h)
+
+                # --- 3 : Dessiner les clones DEVANT moi---
+                for ox, oy in clones_devant:
+                    frame_affichage = apply_cloned_person(hs_x+ox, hs_y+oy, frame_affichage, person_roi, mask_roi, hs_w, hs_h)
 
             elif type_sort_actif == "TRANSFORMATION" and face_detected and dst_warping_points is not None:
                 asset = assets.get(choix_transfo[transfo_idx])
