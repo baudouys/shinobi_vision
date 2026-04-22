@@ -27,7 +27,6 @@ def load_transformation_images():
     refs = {
         "messi": np.array([[1236, 867], [499, 836], [812, 1388]], dtype=np.float32),
         "saitama": np.array([[1467, 904], [558, 904], [941, 1213]], dtype=np.float32),
-        # Pour le ballon, prends les deux bords du col et le pied
         "ballon": np.array([[4120, 2525], [380, 2525], [2250, 4123]], dtype=np.float32)
     }
 
@@ -72,6 +71,17 @@ def apply_cloned_person(dest_x, dest_y, current_frame, roi_color, roi_mask, hs_w
     return current_frame
 
 
+def load_substitution_background():
+    # Charge une image de fond neutre pour remplir le trou de disparition
+    # (ex: un mur flou, ou le fond du territoire)
+    path = os.path.join("img_src", "disparition_bg.jpeg")
+    if os.path.exists(path):
+        return cv2.imread(path)
+    else:
+        # Si pas d'image, on crée un fond gris neutre
+        return np.full((720, 1280, 3), (150, 150, 150), dtype=np.uint8)
+
+
 # --- MAIN ---
 
 def main():
@@ -101,6 +111,9 @@ def main():
     son_cancel = load_sound("cancel.mp3")
     son_territoire = load_sound("territoire.mp3")
     img_territory = cv2.imread("img_src/territoire.png")
+    img_substitution = load_substitution_background()
+    son_disparition = load_sound("disparition.mp3") 
+    last_valid_pts = None # Variable de mémoire pour les points
     
     cap = cv2.VideoCapture(0)
 
@@ -144,11 +157,14 @@ def main():
                 pts.append([lm[i].x * w, lm[i].y * h])
             dst_warping_points = np.array(pts, dtype=np.float32)
 
+            # SAUVEGARDE : On mémorise ces points comme étant les derniers valides
+            last_valid_pts = dst_warping_points.copy()
+
             # Zone Interaction
             roi_x, roi_y = int(lm[152].x * w) - 125, int(lm[152].y * h) + 50
             roi_x, roi_y = max(0, min(roi_x, w-roi_w)), max(0, min(roi_y, h-roi_h))
 
-            # Zone Cloange (tête + épaules)
+            # Zone Clonage (tête + épaules)
             # On définit une boîte autour du visage (Landmarks 10 haut, 152 bas, 234 gauche, 454 droite)
             fw = int((lm[454].x - lm[234].x) * w)
             fh = int((lm[152].y - lm[10].y) * h)
@@ -167,7 +183,7 @@ def main():
             h2 = hand_res.multi_hand_landmarks[1].landmark
             
             # GESTE DE LA CROIX (Annulation)
-            idx1, idx2 = h1[8], h2[8]
+            idx1, idx2 = h1[6], h2[6]
             dist_indices = get_distance(idx1, idx2, w, h)
             # On vérifie si les index se croisent (position X inversée par rapport aux poignets)
             poignet1_x, poignet2_x = h1[0].x, h2[0].x
@@ -177,7 +193,7 @@ def main():
             poignet1_x, poignet2_x = h1[0].x, h2[0].x
             is_crossed = (h1[0].x < h2[0].x and h1[8].x > h2[8].x) or (poignet1_x > poignet2_x and idx1.x < idx2.x)
             
-            if dist_indices < 40 and is_crossed:
+            if dist_indices < 20 and is_crossed:
                 if sort_actif: 
                     if son_cancel: son_cancel.play()
                 sort_actif = False
@@ -186,15 +202,19 @@ def main():
             # ACTIVATION DANS LA ZONE
             cx_hand, cy_hand = int(((idx1.x + idx2.x)/2)*w), int(((idx1.y + idx2.y)/2)*h)
             if roi_x < cx_hand < roi_x + roi_w and roi_y < cy_hand < roi_y + roi_h:
-                d_idx = get_distance(h1[8], h2[8], w, h)
-                d_th = get_distance(h1[4], h2[4], w, h)
-                d_base = get_distance(h1[5], h2[5], w, h)
+                d_idx = get_distance(h1[8], h2[8], w, h) # bouts des index
+                d_th = get_distance(h1[4], h2[4], w, h) # bouts des pouces
+                d_maj = get_distance(h1[12], h2[12], w, h) # bouts des majeurs
+                d_basemaj = get_distance(h1[9], h2[9], w, h) # bases des majeurs
                 d_palms = get_distance(h1[0], h2[0], w, h) # Distance entre les bases des paumes
+                d_boutmajeur_milindex = get_distance(h1[6], h1[12], w, h) # Distance entre le bout du majeur et le milieu de l'index
+                d_lf = get_distance(h1[20], h2[20], w, h) # Distance entre les bouts des petits doigts
                 
-                if d_idx < 35 and d_th < 35 and d_palms > 40: geste_instantane = "FLOU"
-                elif d_idx < 30 and d_palms > 40: geste_instantane = "CLONAGE"
-                elif d_base < 60: geste_instantane = "TRANSFORMATION"
-                elif d_palms < 40: geste_instantane = "EXTENSION_TERRITOIRE"
+                if d_idx < 20 and d_th < 20 and d_palms > 50: geste_instantane = "FLOU"
+                elif d_idx < 20 and d_maj < 20: geste_instantane = "CLONAGE"
+                elif d_basemaj < 20: geste_instantane = "TRANSFORMATION"
+                elif d_boutmajeur_milindex < 20 and d_basemaj > 50: geste_instantane = "EXTENSION_TERRITOIRE"
+                elif d_lf < 20 and d_idx > 50 : geste_instantane = "DISPARITION"
 
                 if geste_instantane != "Aucun" and (not sort_actif or type_sort_actif != geste_instantane):
                     #  Jouer le son
@@ -202,6 +222,7 @@ def main():
                     if geste_instantane == "TRANSFORMATION" and son_transfo: son_transfo.play()
                     if geste_instantane == "FLOU" and son_flou: son_flou.play()
                     if geste_instantane == "EXTENSION_TERRITOIRE" and son_territoire: son_territoire.play()
+                    if geste_instantane == "DISPARITION" and son_disparition: son_disparition.play()
                     sort_actif = True
                     type_sort_actif = geste_instantane
                     temps_activation = current_time
@@ -336,6 +357,42 @@ def main():
                     # pour faire monter la tension avant l'apparition du territoire
                     if int(dt * 10) % 2 == 0:
                         frame_affichage = cv2.convertScaleAbs(frame_affichage, alpha=1.2, beta=30)
+
+            if type_sort_actif == "DISPARITION":
+                dt = current_time - temps_activation
+
+                if last_valid_pts is not None:
+                    p1, p2 = last_valid_pts[0], last_valid_pts[1] # Oreilles
+                    center_face = np.mean(last_valid_pts[:2], axis=0)
+                    # --- ÉTAPE A : INPAINTING PAR SUBSTITUTION ---
+                    
+                    # 1. Redimensionner le fond de substitution à la taille de l'écran
+                    bg_sub_resized = cv2.resize(img_substitution, (w, h), interpolation=cv2.INTER_LINEAR)
+                    
+                    # 2. Créer le masque inversé (le trou à remplir)
+                    mask_inv_person = cv2.bitwise_not(binary_mask)
+                    
+                    # 3. Isoler le décor réel (tout sauf toi)
+                    frame_bg_real = cv2.bitwise_and(frame, frame, mask=mask_inv_person)
+                    
+                    # 4. Isoler le fond de substitution (uniquement à ta forme)
+                    frame_fg_sub = cv2.bitwise_and(bg_sub_resized, bg_sub_resized, mask=binary_mask)
+                    
+                    # 5. Fusionner pour boucher le trou noir (Inpainting)
+                    # 'frame_recomposed' est ton décor réel avec ton corps remplacé par 'substitution_bg'
+                    frame_recomposed = cv2.add(frame_bg_real, frame_fg_sub)
+                    
+                    # On met à jour frame_affichage avec ce nouveau fond inpainted
+                    frame_affichage = frame_recomposed.copy()
+
+                    # --- ÉTAPE B : L'EFFET DE FUMÉE (Masquage de transition) ---
+                    if dt < 1.0: # Fumée pendant 1 seconde
+                        # On dessine la fumée sur le frame recomposé
+                        for r in range(10, int(dt*300), 15):
+                            overlay = frame_affichage.copy()
+                            cv2.circle(overlay, (int(center_face[0]), int(center_face[1])), r, (180, 180, 180), -1)
+                            cv2.addWeighted(overlay, 0.4, frame_affichage, 0.6, 0, frame_affichage)
+
 
         # UI
         if face_detected:
