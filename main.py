@@ -41,6 +41,7 @@ def load_transformation_images():
             print(f"Fichier introuvable : {filepath}")
     return images
 
+
 def apply_cloned_person(dest_x, dest_y, current_frame, roi_color, roi_mask, hs_w, hs_h):
     h_f, w_f = current_frame.shape[:2]
     
@@ -70,6 +71,7 @@ def apply_cloned_person(dest_x, dest_y, current_frame, roi_color, roi_mask, hs_w
     current_frame[y1:y2, x1:x2] = cv2.add(bg_cleaned, person_cleaned)
     return current_frame
 
+
 # --- MAIN ---
 
 def main():
@@ -97,6 +99,8 @@ def main():
     son_transfo = load_sound("transformation.mp3")
     son_flou = load_sound("flou.mp3")
     son_cancel = load_sound("cancel.mp3")
+    son_territoire = load_sound("territoire.mp3")
+    img_territory = cv2.imread("img_src/territoire.png")
     
     cap = cv2.VideoCapture(0)
 
@@ -108,6 +112,8 @@ def main():
         h, w, _ = frame.shape
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         current_time = time.time()
+
+        img_territory_large = cv2.resize(img_territory, (int(w*1.5), int(h*1.5))) # On l'agrandit un peu pour avoir de la marge pour le mouvement
 
         # IMPORTANT : On crée une copie pour l'affichage (les effets iront dessus)
         # MediaPipe continuera de travailler sur 'frame' qui reste net !
@@ -183,16 +189,19 @@ def main():
                 d_idx = get_distance(h1[8], h2[8], w, h)
                 d_th = get_distance(h1[4], h2[4], w, h)
                 d_base = get_distance(h1[5], h2[5], w, h)
+                d_palms = get_distance(h1[0], h2[0], w, h) # Distance entre les bases des paumes
                 
-                if d_idx < 35 and d_th < 35: geste_instantane = "FLOU"
-                elif d_idx < 30: geste_instantane = "CLONAGE"
+                if d_idx < 35 and d_th < 35 and d_palms > 40: geste_instantane = "FLOU"
+                elif d_idx < 30 and d_palms > 40: geste_instantane = "CLONAGE"
                 elif d_base < 60: geste_instantane = "TRANSFORMATION"
+                elif d_palms < 40: geste_instantane = "EXTENSION_TERRITOIRE"
 
                 if geste_instantane != "Aucun" and (not sort_actif or type_sort_actif != geste_instantane):
                     #  Jouer le son
                     if geste_instantane == "CLONAGE" and son_clonage: son_clonage.play()
                     if geste_instantane == "TRANSFORMATION" and son_transfo: son_transfo.play()
                     if geste_instantane == "FLOU" and son_flou: son_flou.play()
+                    if geste_instantane == "EXTENSION_TERRITOIRE" and son_territoire: son_territoire.play()
                     sort_actif = True
                     type_sort_actif = geste_instantane
                     temps_activation = current_time
@@ -283,6 +292,50 @@ def main():
                 f_zone = frame_affichage[max(0,hs_y):hs_y+hs_h, max(0,hs_x):hs_x+hs_w]
                 if f_zone.size > 0:
                     frame_affichage[max(0,hs_y):hs_y+hs_h, max(0,hs_x):hs_x+hs_w] = cv2.GaussianBlur(f_zone, (99,99), 30)
+
+            if type_sort_actif == "EXTENSION_TERRITOIRE":
+                dt = current_time - temps_activation
+                duree_son = 6.2  # Ajuster selon la durée
+                
+                # On n'affiche l'effet que SI le son est fini (ou presque fini)
+                if dt > duree_son:
+                    if img_territory_large is not None and face_detected:
+                        
+                        # --- CALCUL DU PARALLAXE ---
+                        # 1. Trouver le centre du visage
+                        face_center_x = dst_warping_points[0][0] # Utilise l'oreille ou le nez
+                        
+                        # 2. Calculer le décalage (Ratio entre -0.5 et 0.5)
+                        # Si tu es à gauche, ratio est négatif, si tu es à droite, positif
+                        ratio_x = (face_center_x / w) - 0.5
+                        
+                        # 3. Déterminer la zone de l'image large à extraire
+                        # On veut extraire une zone de taille (w, h) dans l'image (w*1.5, h*1.5)
+                        center_bg_x = int(img_territory_large.shape[1] / 2)
+                        center_bg_y = int(img_territory_large.shape[0] / 2)
+                        
+                        # On déplace le centre de lecture à l'inverse de ton mouvement
+                        # Le multiplicateur 200 définit l'amplitude du mouvement du fond
+                        move_x = int(ratio_x * 300) 
+                        
+                        start_x = (center_bg_x - w//2) + move_x
+                        start_y = (center_bg_y - h//2)
+                        
+                        # Extraction de la fenêtre de fond (Crop)
+                        bg_window = img_territory_large[start_y:start_y+h, start_x:start_x+w]
+
+                        # --- COMPOSITION (Chroma Key) ---
+                        mask_inv = cv2.bitwise_not(binary_mask)
+                        fg_cleaned = cv2.bitwise_and(frame, frame, mask=binary_mask)
+                        bg_cleaned = cv2.bitwise_and(bg_window, bg_window, mask=mask_inv)
+                        
+                        frame_affichage = cv2.add(fg_cleaned, bg_cleaned)
+                        
+                else:
+                    # PENDANT LE SON : On peut ajouter un effet de flash ou de tremblement
+                    # pour faire monter la tension avant l'apparition du territoire
+                    if int(dt * 10) % 2 == 0:
+                        frame_affichage = cv2.convertScaleAbs(frame_affichage, alpha=1.2, beta=30)
 
         # UI
         if face_detected:
