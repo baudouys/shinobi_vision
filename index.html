@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Projet <i>Shinobi Vision</i> - Benjamin Audouys</title>
+    <title>Projet Shinobi Vision - Benjamin Audouys</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;600;700&family=Fira+Code:wght@400;500&display=swap');
         
@@ -447,7 +447,9 @@
 
         <div class="image-section">
             <h2>Introduction</h2>
-
+            Ce projet, intitulé <i>Shinobi Vision</i>, consiste à développer une application interactive utilisant la webcam, et permettant à un utilisateur de déclencher différents effets visuels en réalisant des gestes avec la main dans une zone définie de l'image. <br><br>
+            Il explore l'intersection entre la vision par ordinateur en temps réel et les effets spéciaux numériques. L'objectif est de créer une interface pour activer des sorts visuels inspirés de la culture pop (notamment Naruto et Jujutsu Kaisen) via des gestes manuels. Le défi technique réside dans la fluidité des transformations et la précision du détourage pour donner un rendu le plus naturel possible. <br><br>
+            Ce rapport retrace les différentes étapes de l'implémentation.
 
         </div>
 
@@ -456,261 +458,256 @@
     <!-- Partie 0 -->
     <!-- Partie 0 -->
     <!-- Partie 0 -->
-    <div class="container">
-        <div class="image-section">
-            <h2>Étape 1 -Capture webcam</h2>
-
-            Afficher le flux vidéo en temps réel
-
-            <div class="figure-container">
-                <img src="./img_rapport/sec1/horseOnMars.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
-            </div>
-            <span style="color:orange">generate_image</span>
-
-        </div>
-    </div>
 
     <div class="container">
         <div class="image-section">
-            <h2>Étape 1 -Capture webcam</h2>
+            <h2>Étape 1 - Capture webcam</h2>
 
-            Afficher le flux vidéo en temps réel
-
-            cv2.VideoCapture(0)
-            while True
-            cv2.imshow("Webcam", frame)
-            # Nettoyage
-            cap.release()
-            cv2.destroyAllWindows()
-
-            inversion miroir pour que l'affichage soit plus intuitif avec frame = cv2.flip(frame, 1)
+            La première étape consiste à établir un flux vidéo stable via la bibliothèque OpenCV. Une attention a été portée à l'inversion du flux (effet miroir avec <span style="color:orange">cv2.flip()</span>) pour rendre l'interaction plus intuitive pour l'utilisateur, transformant l'écran en un miroir réactif.
 
             <div class="figure-container">
                 <img src="./imgs/capture_video_ok.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
             </div>
-            <span style="color:orange">generate_image</span>
-
         </div>
     </div>
 
     <div class="container">
         <div class="image-section">
-            <h2>Étape 2 et 3 -Détection du visage et zone de gestes</h2>
+            <h2>Étape 2 et 3 - Détection du visage et zone de gestes</h2>
 
-            Utilisation de MediaPipe pour la détection du visage (mp.solutions.face_detection) version 0.10.21 (ancienne mais stable qui permet de ne pas utiliser la nouvelle API est beaucoup plus verbeuse car elle nécessite de télécharger des fichiers de modèles séparés (fichiers .task))
+            Nous utilisons <span style="color:orange">MediaPipe Face Mesh</span> pour obtenir 468 points de repère faciaux en 3D. La version de MediaPipe utilisée est la 0.10.21, quelque peu ancienne mais stable et qui permet de ne pas utiliser la nouvelle API beaucoup plus verbeuse. <br><br>
 
-            config du modèle face_detection = mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5)
+            La fonction <span style="color:orange">face_detection.process(rgb_frame) </span> détecte le visage (après conversion de la frame en RGB), puis on récupère la boite englobante du visage avec <span style="color:orange">detection.location_data.relative_bounding_box</span>. <br><br>
 
-            détection du visage avec face_detection.process(rgb_frame) (après conversion de la frame en RGB)
-
-            on récupère la boit englobante du visage avec detection.location_data.relative_bounding_box
-
-            Dessins des zones avec cv2.rectangle
+            Une fois le visage détecté, la zone de gestes est placé juste dessous, afin d'avoir une zone délimitée pour les gestes.
             
-
             <div class="figure-container">
                 <img src="./imgs/detection_visage_et_zone_gestes.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
             </div>
-            <span style="color:orange">generate_image</span>
 
+            Les points clés comme le menton (point 152) ou les oreilles (234 et 454) servent de point d'ancrage pour définir une zone d'interaction (ROI - Region of Interest) dynamique qui suit l'utilisateur. Un problème venant avec cela est que si l'utilisateur sort du champ ou fait des mouvements rapides, les variables deviennent nulles. Donc nous avons implémenté des conditions de vérification pour éviter que le programme ne plante.
+            
         </div>
     </div>
 
 
     <div class="container">
         <div class="image-section">
-            <h2>Étape 4 -Détection simple de geste</h2>
+            <h2>Étape 4 - Détection simple de geste</h2>
 
-            Utilisation de Mediapipe
-            mp_hands = mp.solutions.hands
-            mp_drawing = mp.solutions.drawing_utils
+            La détection repose sur <span style="color:orange">MediaPipe Hands</span>.
 
-            config du modèle hands = mp_hands.Hands(max_num_hands=2, min_detection_confidence=0.7)
+            <div class="figure-container">
+                <img src="./imgs/hand_landmarks.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
+            </div>
 
-            récupération des coordonnées de l'index (landmark 8) index_tip = hand_landmarks.landmark[8] pour tester la collision
+            On récupère les différents landmarks des 2 mains, puis avec un calcul de la distance euclidienne entre les pixels correspondant aux landmarks, on peut définir si un geste est effectué ou non. <br><br>
 
-            Et vérification des coordonnées de la main si elle est bien dans la zone de gestes
 
             <div class="figure-container">
                 <img src="./imgs/detection_gestes.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
             </div>
-            <span style="color:orange">generate_image</span>
+            
+            Un geste est alors bien détecté par l'application.
 
         </div>
     </div>
 
     <div class="container">
         <div class="image-section">
-            <h2>Étape 5 -Système de “sorts</h2>
+            <h2>Étape 5 - Système de sorts</h2>
 
-            détection des gestes hand_results = hands.process(rgb_frame)
-
-            il faut les 2 mains
-
-            on récupère les 2 mains, le bout des doigts (index, majeurs, pouces idx1, maj1, thumb1 = h1[8], h1[12], h1[4]
-            idx2, maj2, thumb2 = h2[8], h2[12], h2[4])
-
-
-            mapping geste → effet
+            Une fois la détection de gestes implémentée, nous pouvons associer des gestes particuliers aux sorts. Pour cela, 3 gestes sont décrits et serviront de points de départ pour 3 sorts.
 
             <h3>Clonage</h3>
-            index et majeurs des deux mains se touchent
-
-            dist_idx = get_distance(idx1, idx2, w, h)
-            dist_maj = get_distance(maj1, maj2, w, h)
-            if dist_idx < 30 and dist_maj < 30:
-                geste = "CLONAGE"
+            Les index (landmarks 8) et majeurs (landmarks 12) des deux mains se touchent (distance inférieure à 20).
             <div class="figure-container">
                 <img src="./imgs/detection_clonage.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
             </div>
 
             <h3>Flou</h3>
-            Geste triangle où les deux index se touchent ET les deux pouces se touchent
-            dist_thumb = get_distance(thumb1, thumb2, w, h)
-            if dist_idx < 40 and dist_thumb < 40 and geste == "Aucun":
-                geste = "FLOU"
+            Geste en triangle où les deux index et les deux pouces (landmarks 4) se touchent.
             <div class="figure-container">
                 <img src="./imgs/detection_flou.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
             </div>
 
             <h3>Transformation</h3>
-            Mains serrées, poignets proches
-            dist_wrist = get_distance(h1[5], h2[5], w, h)
-            if dist_wrist < 50 and geste == "Aucun":
-                geste = "TRANSFORMATION"
+            Poings serrés et collés (bases des majeurs (landmarks 9) se touchent).
             <div class="figure-container">
                 <img src="./imgs/detection_transformation.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
             </div>
 
             <h3>Aucun geste</h3>
-            Lorsqu'aucun des gestes n'est effectué, il n'y a bien aucun geste de détecté
+            Lorsqu'aucun des gestes n'est effectué, il n'y a bien aucun geste de détecté.
             <div class="figure-container">
                 <img src="./imgs/detection_aucun.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
             </div>
-            <span style="color:orange">generate_image</span>
 
         </div>
     </div>
 
     <div class="container">
         <div class="image-section">
-            <h2>Étape 6 - Effet 1 : Clonage</h2>
+            <h2>Étape 6 - Sort 1 : "Clonage"</h2>
 
-            1er essai : 1 clone de chaque côté (coupé au buste)
+            On utilise la segmentation de silhouette pour extraire l'utilisateur et créer les clones, puis on redessine cette silhouette à plusieurs offsets (x, y). <br><br>
 
-            Pb de superposition des clones -> affichage dans l'ordre
-
-            Pb de profondeur (le clone au dessus de moi) -> redessiner moi à la fin à me position exacte
-            + copie de person_roi et mask_roi
-
-            masque de segmentation avec segment_model.process(rgb_frame)
-
-            # On utilise la taille de ta zone de capture (hs_w, hs_h) pour espacer
-                gap_x = int(hs_w * 0.9)
-                gap_y = int(hs_h * 0.4)
-
-                # Liste des positions (x_offset, y_offset, opacité)
-                positions_fixes = [
-                    # --- RANG ARRIÈRE (Y négatif, on commence par eux) ---
-                    (0, -gap_y * 1.5), 
-                    (-gap_x * 2, -gap_y), (gap_x * 2, -gap_y),
-                    (-gap_x, -gap_y), (gap_x, -gap_y),
-
-                    # --- RANG MILIEU (Y proche de 0) ---
-                    (-gap_x * 2, 0), (gap_x * 2, 0),
-                    (-gap_x, 0), (gap_x, 0),
-
-                    # --- RANG AVANT (Y positif, ils seront dessinés EN DERNIER) ---
-                    (-gap_x, gap_y), (gap_x, gap_y),
-                    (0, gap_y * 1.2)
-                ]
-                # On s'assure que les plus petits Y (haut de l'écran) sont dessinés en premier
-                positions_fixes.sort(key=lambda pos: pos[1])
-
-                # Sauvegarde de mon apparence réelle avant de commencer à gribouiller sur le frame
-                mon_apparence = person_roi.copy()
-                mon_masque = mask_roi.copy()
-
-                # Fonction de dessin bitwise (inchangée mais nécessaire)
-                def apply_cloned_person(dest_x, dest_y, current_frame, roi_color, roi_mask):
-                    if dest_x < 0 or dest_y < 0 or dest_x + hs_w >= w or dest_y + hs_h >= h:
-                        return current_frame
-                    
-                    bg_target = current_frame[dest_y:dest_y+hs_h, dest_x:dest_x+hs_w]
-                    if bg_target.shape[:2] != roi_color.shape[:2]:
-                        return current_frame
-
-                    mask_inv = cv2.bitwise_not(roi_mask)
-                    bg_cleaned = cv2.bitwise_and(bg_target, bg_target, mask=mask_inv)
-                    person_cleaned = cv2.bitwise_and(roi_color, roi_color, mask=roi_mask)
-                    result_zone = cv2.add(bg_cleaned, person_cleaned)
-                    
-                    current_frame[dest_y:dest_y+hs_h, dest_x:dest_x+hs_w] = result_zone
-                    return current_frame
-
-                for ox, oy in positions_fixes:
-                    # On ignore la position (0,0) si elle est dans la liste pour ne pas me doubler
-                    if ox == 0 and oy == 0: continue
-                    dx = int(hs_x + ox)
-                    dy = int(hs_y + oy)
-                    # Application du clone
-                    frame = apply_cloned_person(dx, dy, frame, mon_apparence, mon_masque)
-
-                # Me redessiner moi-même au premier plan
-                frame = apply_cloned_person(hs_x, hs_y, frame, mon_apparence, mon_masque)
+            Un problème qui est apparu était sur la superposition des clones, les clones de derrière étaient au premier plan, ce qui donnait un rendu peu réaliste. La solution trouvée est de l'afficher dans l'ordre souhaité en les triant selon y: d'abord ceux du fond, puis l'utilisateur, puis ceux de devant qui apparaissent ainsi au premier plan.
 
             <div class="figure-container">
-                <img src="./img_rapport/sec1/horseOnMars.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
+                <img src="./imgs/clonage.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
             </div>
-            <span style="color:orange">generate_image</span>
+
+            Voici la vidéo du lancement du sort et du test du sort.
+
+            <div style="text-align: center; margin: 20px 0;">
+            <video width="640" height="auto" controls>
+                <source src="./imgs/clonage.mp4" type="video/mp4">
+            </video>
+            </div>
+
+            Le geste est bien détecté et les clones sont bien positionnés autour de moi, le rendu est plutôt naturel avec des découpes précises de ma silhouette. On observe cependant que l'on perd les clones par moments, dû à un mouvement trop rapide ou le fait de pencher même légèrement qui peut perturber la détection du visage. 
 
         </div>
     </div>
 
     <div class="container">
         <div class="image-section">
-            <h2>Étape 7 — Effet 2 : Flou</h2>
+            <h2>Étape 7 - Sort 2 : "Flou"</h2>
 
-            # Calcul des dimensions du visage
-                x, y, bw, bh = int(bbox.xmin * w), int(bbox.ymin * h), int(bbox.width * w), int(bbox.height * h)
-                
-                # Agrandissement pour englober toute la tête
-                # On ajoute 40% en largeur et 60% en hauteur (vers le haut pour les cheveux)
-                head_x = max(0, int(x - bw * 0.2))
-                head_y = max(0, int(y - bh * 0.5))
-                head_w = min(w - head_x, int(bw * 1.4))
-                head_h = min(h - head_y, int(bh * 1.8))
-                
-                # Extraction de la zone de la tête entière
-                head_roi = frame[head_y:head_y+head_h, head_x:head_x+head_w]
-                # Application du flou Gaussien
-                blurred_head = cv2.GaussianBlur(head_roi, (99, 99), 30)
-                # Réinsertion dans l'image
+            Il s'agit de l'application d'un filtre Gaussien sur une zone rectangulaire définie par le Face Mesh. <br><br>
+            
+            Cependant, le flou appliqué sur l'image principale rendait la frame illisible et empêchait la détection des mains. La solution est d'utiliser une copie de la frame pour l'affichage, afin que le programme puisse travailler sur la frame originale en continuant de détecter les gestes et les visages.
 
             <div class="figure-container">
-                <img src="./img_rapport/sec1/horseOnMars.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
+                <img src="./imgs/flou.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
             </div>
-            <span style="color:orange">generate_image</span>
+
+            Vidéo du sort de flou :
+
+            <div style="text-align: center; margin: 20px 0;">
+            <video width="640" height="auto" controls>
+                <source src="./imgs/flou.mp4" type="video/mp4">
+            </video>
+            </div>
 
         </div>
     </div>
 
     <div class="container">
         <div class="image-section">
-            <h2>Étape 8 — Effet 3 : Transformation</h2>
+            <h2>Étape 8 - Sort 3 : "Transformation"</h2>
 
-            Sources images :
-            https://fr.vecteezy.com/png/26771748-basketball-png-avec-ai-genere
-            https://wallpapers.com/lionel-messi-png?p=2
-            https://fr.vecteezy.com/png/51135727-celui-de-saitama-comique-caricature-une-dessin-anime-delice
+            On emploie ici une transformation affine (<span style="color:orange">cv2.getAffineTransform</span>). Nous mappons un triangle de référence sur une image PNG (oreilles et menton) vers les points correspondants sur le visage de l'utilisateur, ce qui permet d'avoir un rendu fluide qui suit les mouvements. <br><br>
+
+            Sources des images : <br>
+            Ballon de basket <i>https://fr.vecteezy.com/png/26771748-basketball-png-avec-ai-genere</i> <br>
+           Visage de Lionel Messi <i>https://wallpapers.com/lionel-messi-png?p=2</i> <br>
+            Visage de Saitama <i>https://fr.vecteezy.com/png/51135727-celui-de-saitama-comique-caricature-une-dessin-anime-delice</i>
 
             
+            <div class="figure-container">
+                <img src="./imgs/transformation.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
+            </div>
+
+            Vidéo du sort de transformation:
+
+            <div style="text-align: center; margin: 20px 0;">
+            <video width="640" height="auto" controls>
+                <source src="./imgs/transformation.mp4" type="video/mp4">
+            </video>
+            </div>
+
+            Le rendu est plutôt très bon, le visage collé suit mes mouvements lorsque j'ouvre le bouche ou je penche la tête. Mais lorsque je penche trop la tête en arrière on perd la superposition, à cause des seuls 3 points de correspondance qui ont été pris car <span style="color:orange">cv2.getAffineTransform</span> ne prend que 3 points.
+            
+
+        </div>
+    </div>
+
+
+    <div class="container">    
+    <div class="image-section">
+            <h2>Points supplémentaires ajoutés</h2>
+
+            Quelques points ont été ajoutés à la version de base, qui a rapidement été fonctionnelle.
+
+            <h3>Ajout du son à l'apparition des sorts</h3>
+
+            Utilisation de la bibliothèque <span style="color:orange">pygame.mixer</span> pour déclencher des fichiers audio de manière asynchrone. Cela renforce l'immersion en offrant de l'audio en plus du visuel à l'activation d'un sort. <br><br>
+
+            Sources des fichiers audio : <br>
+            Clonage : <i>https://youtu.be/aEQIi0drDhY?si=82XHGumRSFybAEOp</i> <br>
+            Flou et transformation : <i>https://youtu.be/elDunC0fcbo?si=HSMqnm3lQ4lWo1Pl </i> <br>
+            Territoire : <object data="" type="">https://youtu.be/HzCeyfNjSbo?si=1DPGJgmx0nhkYaqJ</object> <br>
+            Disparition : <i>https://youtu.be/-HMb7RFfZds?si=PfHCx9ksHemKVdIk</i>
+
+                
+            <h3>Maintien du sort (Timer de 30s)</h3>
+            Implémentation d'un système de persistance. Une fois le geste détecté, un timestamp (<span style="color:orange">time.time()</span>) est enregistré. Le sort reste actif pendant 30 secondes, ce qui libère les mains de l'utilisateur. 
 
             <div class="figure-container">
-                <img src="./img_rapport/sec1/horseOnMars.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
+                <img src="./imgs/timer.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
             </div>
-            <span style="color:orange">generate_image</span>
 
+            <h3>Ajout d'un sort "Cancel"</h3>
+            Une "croix" formée par les index permet d'annuler manuellement les sorts en cours via une détection de croisement des index.
+
+            <div class="figure-container">
+                <img src="./imgs/geste_cancel.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
+            </div>
+
+            On peut vérifier son bon fonctionnement à la fin des vidéos de chaque sort.
+
+            <h3>Sort "Extension du Territoire"</h3>
+
+            Remplacement total du décor en arrière-plan via l'utilisation d'un masque de segmentation. Le fond bouge en fonction de la position du visage, créant une illusion de profondeur 3D sur une image 2D. Cela a été réalisé en agrandissant l'image de fond donnée, en me plaçant au centre initialement et en déplaçant l'image de fond affichée en fonction des mouvements de mon visage. <br><br>
+            
+            Ce sort a été implémenté avec un effet visuel de flash qui, en plus du son, ajoute une nouvelle dimension épique à l'application.
+
+            <div class="figure-container">
+                <img src="./imgs/geste_territoire.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
+            </div>
+
+            Le geste consiste à coller les 2 bases de paumes.
+            <div class="figure-container">
+                <img src="./imgs/territoire.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
+            </div>
+
+            Vidéo du sort Extension du territoire:
+
+            <div style="text-align: center; margin: 20px 0;">
+            <video width="640" height="auto" controls>
+                <source src="./imgs/territoire.mp4" type="video/mp4">
+            </video>
+            </div>
+
+            <h3>Sort "Disparition"</h3>
+            Enfin, pour le sort de disparition, nous avons utilisé une image de substitution pour remplir le vide laissé par le corps segmenté. Le réalisme du rendu dépend énormément de l'image de fond choisi, et de sa correspondance avec le fond réel.
+
+            <div class="figure-container">
+                <img src="./imgs/geste_disparition.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
+            </div>
+
+            Le geste consiste à coller les 2 bouts des petits doigts.
+
+            <div class="figure-container">
+                <img src="./imgs/ecran_fumee.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
+            </div>
+
+            Un effet écran de fumée a été ajoutée lors de l'apparition du sort.
+
+            <div class="figure-container">
+                <img src="./imgs/disparition.png" alt="horseOnMars" class="clickable-image" data-fullsize="Preambule.png" onclick="openLightbox(this)">
+            </div>
+
+            Vidéo du sort de disparition:
+
+            <div style="text-align: center; margin: 20px 0;">
+            <video width="640" height="auto" controls>
+                <source src="./imgs/disparition.mp4" type="video/mp4">
+            </video>
+            </div>
+            Le rendu est très correct. Mais comme dit précédemment, son réalisme dépend énormément de la concordance entre l'image de fond pour le remplissage et le fond réel.
         </div>
     </div>
 
@@ -721,9 +718,14 @@
     <!-- Conclusion -->
     <div class="container">    
     <div class="image-section">
-            <h2>Conclusion</h2>
+            <h2>Perspectives et Conclusion</h2>
+            Ce projet a utilisé les concepts de photographie algorithmique afin de créer des effets visuels complexes en temps réel à partir de gestes manuels. <br><br>
 
-                
+            Les rendus sont très corrects, l'ajout du son et des effets visuels ajoutent quelque chose en plus à l'unique sort. <br><br>
+            
+            Quelques perspectives peuvent être explorées : L'intégration de modèles de Deep Inpainting plus poussés permettrait de recréer le décor réel derrière l'utilisateur lors de la disparition, mais ce serait bien plus coûteux que de simples algorithmes de géométrie, et l'utilisation de la pose (MediaPipe Pose) permettrait des sorts liés au mouvement du corps complet.
+
+            En conclusion, "Shinobi Vision" réussit à transformer une webcam en un univers tout entier, avec différents sorts à explorer, et des possibilités infinies d'effets à immplémenter.    
         </div>
     </div>
         
